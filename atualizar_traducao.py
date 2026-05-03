@@ -21,6 +21,7 @@ import io
 import json
 import os
 import shutil
+import string
 import subprocess
 import sys
 import urllib.request
@@ -34,14 +35,16 @@ CONFIG_FILE = os.path.join(WORK_DIR, "config.json")
 EXTRACT_DIR = os.path.join(WORK_DIR, "extracted")
 OUTPUT_DIR  = os.path.join(WORK_DIR, "output")
 
-GAME_DIR_CANDIDATES = [
-    r"C:\Program Files (x86)\Steam\steamapps\common\OddSparks",
-    r"C:\Program Files\Steam\steamapps\common\OddSparks",
-    r"C:\Program Files\GOG Galaxy\Games\OddSparks",
-    r"D:\SteamLibrary\steamapps\common\OddSparks",
-    r"E:\SteamLibrary\steamapps\common\OddSparks",
-    r"D:\GOG Games\OddSparks",
-    r"C:\GOG Games\OddSparks",
+_STEAM_BASES = [
+    "SteamLibrary\\steamapps\\common",
+    "Steam\\steamapps\\common",
+    "Program Files (x86)\\Steam\\steamapps\\common",
+    "Program Files\\Steam\\steamapps\\common",
+]
+_GOG_BASES = [
+    "GOG Games",
+    "Games",
+    "Program Files\\GOG Galaxy\\Games",
 ]
 
 LOCRES_FILES = [
@@ -50,11 +53,8 @@ LOCRES_FILES = [
     ("OddsparksQuests",    "OddsparksQuests"),
 ]
 
-PATH_HASH_SEED = 2535877449
-REPAK_URL = (
-    "https://github.com/trumank/repak/releases/latest/download/"
-    "repak-x86_64-pc-windows-msvc.zip"
-)
+PATH_HASH_SEED  = 2535877449
+REPAK_API_URL   = "https://api.github.com/repos/trumank/repak/releases/latest"
 
 
 def step(msg):
@@ -67,6 +67,21 @@ def run(cmd, **kwargs):
         print(f"ERRO: {result.stderr}")
         sys.exit(1)
     return result.stdout
+
+
+def _scan_drives_for_game():
+    """Varre todas as letras de drive com padrões Steam e GOG."""
+    drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.isdir(f"{d}:\\")]
+    for drive in drives:
+        for base in _STEAM_BASES:
+            path = os.path.join(drive, base, "OddSparks")
+            if os.path.isdir(path):
+                return path
+        for base in _GOG_BASES:
+            path = os.path.join(drive, base, "OddSparks")
+            if os.path.isdir(path):
+                return path
+    return None
 
 
 def find_game_dir(cli_arg=None):
@@ -90,10 +105,17 @@ def find_game_dir(cli_arg=None):
             print(f"  Usando caminho salvo: {saved}")
             return saved
 
-    for path in GAME_DIR_CANDIDATES:
-        if os.path.isdir(path):
-            print(f"  Jogo encontrado em: {path}")
-            return path
+    # Repo clonado dentro da pasta do jogo → pai é o game dir
+    parent = os.path.dirname(SCRIPT_DIR)
+    if os.path.exists(os.path.join(parent, "Loc", "Content", "Paks", "Loc-Windows.pak")):
+        print(f"  Jogo encontrado na pasta pai: {parent}")
+        return parent
+
+    # Varrer todas as letras de drive
+    found = _scan_drives_for_game()
+    if found:
+        print(f"  Jogo encontrado em: {found}")
+        return found
 
     print("Diretório do jogo não encontrado automaticamente.")
     print("Opções:")
@@ -110,14 +132,30 @@ def find_game_dir(cli_arg=None):
     return game_dir
 
 
+def _get_repak_url():
+    """Consulta a API do GitHub para obter a URL de download do release mais recente."""
+    req = urllib.request.Request(
+        REPAK_API_URL,
+        headers={"User-Agent": "oddsparks-ptbr", "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req) as r:
+        data = json.loads(r.read())
+    for asset in data.get("assets", []):
+        name = asset["name"]
+        if "windows" in name.lower() and name.endswith(".zip"):
+            return asset["browser_download_url"]
+    raise RuntimeError(f"Asset Windows não encontrado. Assets disponíveis: {[a['name'] for a in data.get('assets', [])]}")
+
+
 def ensure_repak():
     if os.path.exists(REPAK):
         return
     step("Baixando repak...")
-    print(f"  {REPAK_URL}")
     os.makedirs(os.path.dirname(REPAK), exist_ok=True)
     try:
-        data = urllib.request.urlopen(REPAK_URL).read()
+        url = _get_repak_url()
+        print(f"  {url}")
+        data = urllib.request.urlopen(url).read()
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             for member in z.namelist():
                 if member.lower().endswith("repak.exe"):
