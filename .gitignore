@@ -1,0 +1,28 @@
+# Arquivos de saída (gerados pelo script)
+output/
+extracted/
+*.pak
+*.pak.backup
+*.ucas
+*.utoc
+
+# CSVs com conteúdo do jogo (não redistribuir)
+*_en.csv
+*_ptbr.csv
+
+# Cache de tradução (contém strings do jogo)
+translation_cache.json
+
+# Ferramentas baixadas automaticamente
+tools/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Logs
+*.txt
+log_*.txt
