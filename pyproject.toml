@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oddsparks-ptbr"
+version = "0.1.0"
+description = "Ferramentas de tradução PT-BR para OddSparks (UE5)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["deep-translator>=1.11"]
+
+[project.scripts]
+oddsparks-ptbr = "atualizar_traducao:main"
+
+[tool.setuptools]
+py-modules = ["atualizar_traducao", "translate", "locres_tool"]

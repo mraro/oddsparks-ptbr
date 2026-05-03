@@ -1,28 +1,48 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "deep-translator>=1.11",
+# ]
+# ///
 """
 OddSparks - Atualizador de Tradução PT-BR
-Uso: python atualizar_traducao.py
 
-Detecta strings novas após update do jogo, traduz só as novas
-(reutiliza cache das já traduzidas) e reinstala automaticamente.
+Uso:
+  uv run atualizar_traducao.py                           # auto-detecta instalação
+  uv run atualizar_traducao.py "C:/Games/OddSparks"     # caminho explícito
+  set ODDSPARKS_DIR=C:\\Games\\OddSparks && uv run atualizar_traducao.py
+
+Após instalação via uv tool install:
+  oddsparks-ptbr
+  oddsparks-ptbr "C:/Games/OddSparks"
 """
 
-import os
-import sys
-import csv
-import time
-import shutil
-import struct
-import subprocess
+import io
 import json
+import os
+import shutil
+import subprocess
+import sys
+import urllib.request
+import zipfile
+import argparse
 
-GAME_DIR     = r"D:\01_JOGOS_INSTALADOS\OddSparks"
-WORK_DIR     = r"D:\OddSparks_Translation"
-REPAK        = r"D:\OddSparks_Translation\tools\repak\repak.exe"
-PAK_ORIGINAL = os.path.join(GAME_DIR, r"Loc\Content\Paks\Loc-Windows.pak")
-PAK_BACKUP   = PAK_ORIGINAL + ".backup"
-EXTRACT_DIR  = os.path.join(WORK_DIR, "extracted")
-OUTPUT_DIR   = os.path.join(WORK_DIR, "output")
-CACHE_FILE   = os.path.join(WORK_DIR, "translation_cache.json")
+SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+WORK_DIR    = SCRIPT_DIR
+REPAK       = os.path.join(WORK_DIR, "tools", "repak", "repak.exe")
+CONFIG_FILE = os.path.join(WORK_DIR, "config.json")
+EXTRACT_DIR = os.path.join(WORK_DIR, "extracted")
+OUTPUT_DIR  = os.path.join(WORK_DIR, "output")
+
+GAME_DIR_CANDIDATES = [
+    r"C:\Program Files (x86)\Steam\steamapps\common\OddSparks",
+    r"C:\Program Files\Steam\steamapps\common\OddSparks",
+    r"C:\Program Files\GOG Galaxy\Games\OddSparks",
+    r"D:\SteamLibrary\steamapps\common\OddSparks",
+    r"E:\SteamLibrary\steamapps\common\OddSparks",
+    r"D:\GOG Games\OddSparks",
+    r"C:\GOG Games\OddSparks",
+]
 
 LOCRES_FILES = [
     ("OddsparksGame",      "OddsparksGame"),
@@ -31,6 +51,14 @@ LOCRES_FILES = [
 ]
 
 PATH_HASH_SEED = 2535877449
+REPAK_URL = (
+    "https://github.com/trumank/repak/releases/latest/download/"
+    "repak-x86_64-pc-windows-msvc.zip"
+)
+
+
+def step(msg):
+    print(f"\n{'='*50}\n  {msg}\n{'='*50}")
 
 
 def run(cmd, **kwargs):
@@ -41,60 +69,119 @@ def run(cmd, **kwargs):
     return result.stdout
 
 
-def step(msg):
-    print(f"\n{'='*50}")
-    print(f"  {msg}")
-    print('='*50)
+def find_game_dir(cli_arg=None):
+    if cli_arg:
+        path = cli_arg.strip('"').strip("'")
+        if os.path.isdir(path):
+            return path
+        print(f"ERRO: Diretório não encontrado: {path}")
+        sys.exit(1)
+
+    env = os.environ.get("ODDSPARKS_DIR", "")
+    if env and os.path.isdir(env):
+        print(f"  Usando ODDSPARKS_DIR: {env}")
+        return env
+
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            cfg = json.load(f)
+        saved = cfg.get("game_dir", "")
+        if saved and os.path.isdir(saved):
+            print(f"  Usando caminho salvo: {saved}")
+            return saved
+
+    for path in GAME_DIR_CANDIDATES:
+        if os.path.isdir(path):
+            print(f"  Jogo encontrado em: {path}")
+            return path
+
+    print("Diretório do jogo não encontrado automaticamente.")
+    print("Opções:")
+    print('  1. Argumento: uv run atualizar_traducao.py "C:\\Games\\OddSparks"')
+    print("  2. Variável:  set ODDSPARKS_DIR=C:\\Games\\OddSparks")
+    game_dir = input("  3. Digite o caminho agora: ").strip().strip('"').strip("'")
+    if not os.path.isdir(game_dir):
+        print(f"ERRO: Diretório não encontrado: {game_dir}")
+        sys.exit(1)
+
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump({"game_dir": game_dir}, f, ensure_ascii=False, indent=2)
+    print(f"  Caminho salvo em {CONFIG_FILE} para uso futuro.")
+    return game_dir
 
 
-def extract_pak():
+def ensure_repak():
+    if os.path.exists(REPAK):
+        return
+    step("Baixando repak...")
+    print(f"  {REPAK_URL}")
+    os.makedirs(os.path.dirname(REPAK), exist_ok=True)
+    try:
+        data = urllib.request.urlopen(REPAK_URL).read()
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            for member in z.namelist():
+                if member.lower().endswith("repak.exe"):
+                    with z.open(member) as src, open(REPAK, "wb") as dst:
+                        dst.write(src.read())
+                    break
+        print(f"  OK → {REPAK}")
+    except Exception as e:
+        print(f"ERRO ao baixar repak: {e}")
+        print("Baixe manualmente em https://github.com/trumank/repak/releases")
+        print(f"e coloque repak.exe em: {os.path.dirname(REPAK)}")
+        sys.exit(1)
+
+
+def extract_pak(pak_original):
     step("Extraindo pak do jogo...")
     if os.path.exists(EXTRACT_DIR):
         shutil.rmtree(EXTRACT_DIR)
-    run([REPAK, "unpack", PAK_ORIGINAL, "--output", EXTRACT_DIR])
-    print(f"  OK - extraído para {EXTRACT_DIR}")
+    run([REPAK, "unpack", pak_original, "--output", EXTRACT_DIR])
+    print(f"  OK → {EXTRACT_DIR}")
 
 
 def export_csvs():
     step("Exportando strings para CSV...")
+    import locres_tool
     csvs = {}
     for folder, name in LOCRES_FILES:
-        locres = os.path.join(EXTRACT_DIR, "Loc", "Content", "Localization",
-                              folder, "en", f"{name}.locres")
+        locres_path = os.path.join(EXTRACT_DIR, "Loc", "Content", "Localization",
+                                   folder, "en", f"{name}.locres")
         csv_path = os.path.join(WORK_DIR, f"{name}_en.csv")
-        run([sys.executable, os.path.join(WORK_DIR, "locres_tool.py"),
-             "export", locres, csv_path])
-        with open(csv_path, encoding='utf-8') as f:
-            count = sum(1 for _ in csv.DictReader(f))
-        print(f"  {name}: {count} strings")
+        parsed = locres_tool.parse_locres(locres_path)
+        locres_tool.export_csv(parsed, csv_path)
+        print(f"  {name}: {len(parsed['strings'])} strings")
         csvs[name] = csv_path
     return csvs
 
 
 def translate_csvs(csvs):
     step("Traduzindo strings novas (reutiliza cache)...")
+    import translate as translate_mod
+    cache_file = os.path.join(WORK_DIR, "translation_cache.json")
     translated = {}
     for name, csv_in in csvs.items():
         csv_out = os.path.join(WORK_DIR, f"{name}_ptbr.csv")
-        run([sys.executable, os.path.join(WORK_DIR, "translate.py"),
-             csv_in, csv_out, "--batch", "40"])
+        translate_mod.translate_csv(csv_in, csv_out, batch_size=40, cache_file=cache_file)
         translated[name] = csv_out
     return translated
 
 
 def build_locres(translated):
     step("Construindo arquivos .locres PT-BR...")
+    import locres_tool
     for folder, name in LOCRES_FILES:
         locres_en = os.path.join(EXTRACT_DIR, "Loc", "Content", "Localization",
                                  folder, "en", f"{name}.locres")
         locres_pt = os.path.join(EXTRACT_DIR, "Loc", "Content", "Localization",
                                  folder, "pt-BR", f"{name}.locres")
         os.makedirs(os.path.dirname(locres_pt), exist_ok=True)
-        csv_pt = translated[name]
-        run([sys.executable, os.path.join(WORK_DIR, "locres_tool.py"),
-             "build", locres_en, csv_pt, locres_pt])
-        size = os.path.getsize(locres_pt)
-        print(f"  {name}: {size//1024} KB")
+        parsed       = locres_tool.parse_locres(locres_en)
+        translations = locres_tool.apply_translations(parsed, translated[name])
+        result       = locres_tool.build_locres(parsed, translations)
+        with open(locres_pt, "wb") as f:
+            f.write(result)
+        print(f"  {name}: {os.path.getsize(locres_pt) // 1024} KB")
 
 
 def repack():
@@ -106,37 +193,59 @@ def repack():
          "--mount-point", "../../../",
          "--path-hash-seed", str(PATH_HASH_SEED),
          EXTRACT_DIR, out_pak])
-    size = os.path.getsize(out_pak) / (1024*1024)
-    print(f"  Pak gerado: {size:.1f} MB")
+    print(f"  Pak gerado: {os.path.getsize(out_pak) / (1024 * 1024):.1f} MB")
     return out_pak
 
 
-def install(out_pak):
+def install(out_pak, pak_original):
     step("Instalando no jogo...")
-    shutil.copy2(PAK_ORIGINAL, PAK_BACKUP)
-    print(f"  Backup: {PAK_BACKUP}")
-    shutil.copy2(out_pak, PAK_ORIGINAL)
-    print(f"  Instalado: {PAK_ORIGINAL}")
+    pak_backup = pak_original + ".backup"
+    shutil.copy2(pak_original, pak_backup)
+    print(f"  Backup: {pak_backup}")
+    shutil.copy2(out_pak, pak_original)
+    print(f"  Instalado: {pak_original}")
+    return pak_backup
 
 
 def main():
-    print("\n OddSparks Tradução PT-BR - Atualizador")
+    parser = argparse.ArgumentParser(
+        description="OddSparks - Atualizador de Tradução PT-BR",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Exemplos:\n"
+            "  uv run atualizar_traducao.py\n"
+            '  uv run atualizar_traducao.py "C:\\Games\\OddSparks"\n'
+            "  oddsparks-ptbr                    (após: uv tool install .)"
+        ),
+    )
+    parser.add_argument(
+        "game_dir", nargs="?", default=None,
+        metavar="PASTA_DO_JOGO",
+        help="Caminho da instalação do OddSparks (auto-detectado se omitido)",
+    )
+    args = parser.parse_args()
+
+    print("\n OddSparks Tradução PT-BR — Atualizador")
     print(" ========================================\n")
 
-    if not os.path.exists(PAK_ORIGINAL):
-        print(f"ERRO: Pak não encontrado em {PAK_ORIGINAL}")
+    game_dir     = find_game_dir(args.game_dir)
+    pak_original = os.path.join(game_dir, "Loc", "Content", "Paks", "Loc-Windows.pak")
+
+    if not os.path.exists(pak_original):
+        print(f"ERRO: Pak não encontrado em {pak_original}")
         sys.exit(1)
 
-    extract_pak()
-    csvs = export_csvs()
-    translated = translate_csvs(csvs)
+    ensure_repak()
+    extract_pak(pak_original)
+    csvs        = export_csvs()
+    translated  = translate_csvs(csvs)
     build_locres(translated)
-    out_pak = repack()
-    install(out_pak)
+    out_pak     = repack()
+    pak_backup  = install(out_pak, pak_original)
 
     step("CONCLUÍDO!")
     print("  Reinicie o jogo para ver a tradução atualizada.")
-    print(f"  Backup do pak anterior: {PAK_BACKUP}")
+    print(f"  Backup do pak anterior: {pak_backup}")
 
 
 if __name__ == "__main__":

@@ -14,34 +14,60 @@ Traduz automaticamente os arquivos `.locres` do jogo usando Google Translate, pr
 
 ## Requisitos
 
-- Python 3.10+
-- [repak](https://github.com/trumank/repak/releases) (baixado automaticamente)
-- Jogo instalado via GOG/Steam em `D:\01_JOGOS_INSTALADOS\OddSparks`
+- Python 3.10+ **ou** [uv](https://docs.astral.sh/uv/getting-started/installation/) (recomendado — instala dependências automaticamente)
+- [repak](https://github.com/trumank/repak/releases) — baixado automaticamente na primeira execução
+- OddSparks instalado (Steam, GOG ou outro)
+
+## Instalação rápida
+
+```bash
+git clone https://github.com/mraro/oddsparks-ptbr
+cd oddsparks-ptbr
+uv run atualizar_traducao.py
+```
+
+O script detecta a instalação do jogo automaticamente nos caminhos padrão do Steam e GOG.
+Se não encontrar, pede o caminho interativamente e salva para uso futuro.
+
+### Passando o caminho do jogo diretamente
+
+```bash
+uv run atualizar_traducao.py "C:\Games\OddSparks"
+```
+
+### Via variável de ambiente
+
+```bash
+set ODDSPARKS_DIR=C:\Games\OddSparks
+uv run atualizar_traducao.py
+```
+
+### Sem uv (com pip)
 
 ```bash
 pip install deep-translator
+python atualizar_traducao.py
+python atualizar_traducao.py "C:\Games\OddSparks"
 ```
 
-## Instalação rápida (primeira vez)
+### Instalação global como ferramenta (uv tool)
 
 ```bash
-git clone https://github.com/SEU_USUARIO/oddsparks-ptbr
-cd oddsparks-ptbr
-
-# Ajuste os caminhos no topo de atualizar_traducao.py se necessário
-python atualizar_traducao.py
+uv tool install .
+oddsparks-ptbr
+oddsparks-ptbr "C:\Games\OddSparks"
 ```
 
 O script faz tudo automaticamente:
-1. Baixa o repak
+1. Baixa o repak (se necessário)
 2. Extrai o pak do jogo
-3. Traduz as strings (Google Translate + cache)
+3. Traduz as strings (Google Translate + cache local)
 4. Reconstrói e instala
 
 ## Atualizar após patch do jogo
 
 ```bash
-python atualizar_traducao.py
+uv run atualizar_traducao.py
 ```
 
 Só traduz strings **novas** — reutiliza o cache das já traduzidas. Rápido.
@@ -50,22 +76,22 @@ Só traduz strings **novas** — reutiliza o cache das já traduzidas. Rápido.
 
 ### Exportar strings para CSV
 ```bash
-python locres_tool.py export "caminho/en/OddsparksGame.locres" saida.csv
+uv run locres_tool.py export "caminho/en/OddsparksGame.locres" saida.csv
 ```
 
 ### Construir .locres com traduções
 ```bash
-python locres_tool.py build "caminho/en/OddsparksGame.locres" saida.csv "caminho/pt-BR/OddsparksGame.locres"
+uv run locres_tool.py build "caminho/en/OddsparksGame.locres" saida.csv "caminho/pt-BR/OddsparksGame.locres"
 ```
 
 ### Ver informações de um .locres
 ```bash
-python locres_tool.py info "caminho/OddsparksGame.locres"
+uv run locres_tool.py info "caminho/OddsparksGame.locres"
 ```
 
 ### Traduzir um CSV
 ```bash
-python translate.py entrada_en.csv saida_ptbr.csv --batch 40
+uv run translate.py entrada_en.csv saida_ptbr.csv --batch 40
 ```
 
 ## Forçar o idioma PT-BR
@@ -119,11 +145,14 @@ Loc-Windows.pak
 
 ## Reverter para inglês
 
-```bash
-# O backup é criado automaticamente antes de cada instalação
-copy "D:\01_JOGOS_INSTALADOS\OddSparks\Loc\Content\Paks\Loc-Windows.pak.backup" ^
-     "D:\01_JOGOS_INSTALADOS\OddSparks\Loc\Content\Paks\Loc-Windows.pak"
+Um backup é criado automaticamente antes de cada instalação com o sufixo `.backup`.
+Para reverter, copie o backup de volta:
+
 ```
+Loc-Windows.pak.backup  →  Loc-Windows.pak
+```
+
+Caminho padrão Steam: `<SteamLibrary>\steamapps\common\OddSparks\Loc\Content\Paks\`
 
 ## Estrutura do projeto
 
@@ -132,6 +161,7 @@ oddsparks-ptbr/
 ├── locres_tool.py          # Parser/builder de .locres
 ├── translate.py            # Tradução automática com Google Translate
 ├── atualizar_traducao.py   # Script de atualização completo
+├── pyproject.toml          # Definição do pacote uv/pip
 └── README.md
 ```
 

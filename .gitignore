@@ -13,15 +13,19 @@ extracted/
 # Cache de tradução (contém strings do jogo)
 translation_cache.json
 
+# Configuração local (caminho do jogo salvo pelo usuário)
+config.json
+
 # Ferramentas baixadas automaticamente
 tools/
 
-# Python
+# Python / uv
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
+uv.lock
 
 # Logs
 *.txt
